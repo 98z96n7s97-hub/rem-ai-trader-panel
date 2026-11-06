@@ -1,0 +1,242 @@
+
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>REM AI Trader</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#0b1020;color:#f1f5ff;font-family:-apple-system,Arial,sans-serif;padding:20px}
+main,header{max-width:720px;margin:auto}
+header{display:flex;justify-content:space-between;align-items:center}
+h1{font-size:24px;margin:8px 0}
+h2{font-size:18px;margin:0 0 15px}
+p{line-height:1.5}
+.card{background:#182238;border:1px solid #31405a;border-radius:18px;padding:20px;margin:16px 0}
+.small{font-size:13px;color:#a6b4ce}
+.balance{font-size:34px;font-weight:bold;margin:12px 0}
+.row{display:flex;justify-content:space-between;gap:12px;padding:13px 0;border-bottom:1px solid #34405a}
+.row:last-child{border:0}
+.row span:last-child{text-align:right}
+.green{color:#60e5aa}
+.red{color:#ff9292}
+.yellow{color:#ffd27a}
+input,button{width:100%;padding:14px;margin:7px 0;border-radius:12px;font-size:16px}
+input{background:#0c1527;border:1px solid #52617c;color:white}
+button{background:#567fff;color:white;border:0;font-weight:bold}
+button:disabled{opacity:.5}
+.logout{width:auto;padding:10px 14px;background:#33415e;font-size:13px}
+.hidden{display:none}
+#message{max-width:720px;margin:15px auto;overflow-wrap:anywhere}
+</style>
+</head>
+<body>
+
+<header>
+<div>
+<h1>🤖 REM AI Trader</h1>
+<div class="small">Yapay zekâ destekli piyasa takip paneli</div>
+</div>
+<button id="logout" class="logout hidden">Çıkış</button>
+</header>
+
+<main>
+<section id="login" class="card">
+<h2>🔐 Hesabına giriş yap</h2>
+<p class="small">Supabase'de oluşturduğun e-posta ve şifreyi kullan.</p>
+<form id="loginForm">
+<input id="email" type="email" placeholder="E-posta adresi" required>
+<input id="password" type="password" placeholder="Şifre" required>
+<button id="loginBtn" type="submit">Giriş Yap</button>
+</form>
+</section>
+
+<section id="panel" class="hidden">
+
+<div class="card">
+<div class="small">💰 Sanal Nakit Bakiyesi</div>
+<div id="balance" class="balance">—</div>
+<div id="position" class="small"></div>
+<div id="botStatus" class="yellow">Yükleniyor...</div>
+</div>
+
+<div class="card">
+<h2>📊 Son Piyasa Sinyalleri</h2>
+<p id="scanTime" class="small">—</p>
+<div id="signals">Yükleniyor...</div>
+</div>
+
+<div class="card">
+<h2>🧾 Son Bot Taramaları</h2>
+<div id="runs">Yükleniyor...</div>
+</div>
+
+<div class="card">
+<h2>📈 Sanal İşlem Geçmişi</h2>
+<div id="trades">Yükleniyor...</div>
+</div>
+
+<button id="refresh">🔄 Verileri Yenile</button>
+<p class="small">Fiyatlar anlık değil, botun son kaydettiği piyasa verileridir. Gerçek para ile işlem yapılmaz.</p>
+</section>
+</main>
+
+<p id="message" class="small"></p>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.95.3/dist/umd/supabase.min.js"></script>
+<script>
+const URL = "https://ivmrpbdwsjtymzgghuwj.supabase.co";
+const KEY = "sb_publishable_GjM8AWp8EY3lmmR-JncpLg_hB1HdsIV";
+
+const el = id => document.getElementById(id);
+const message = text => el("message").textContent = text;
+const db = window.supabase.createClient(URL, KEY);
+
+const escapeHtml = value => String(value ?? "")
+.replace(/[&<>"']/g, c => ({
+"&":"&amp;",
+"<":"&lt;",
+">":"&gt;",
+'"':"&quot;",
+"'":"&#39;"
+})[c]);
+
+const date = value => value
+? new Date(value).toLocaleString("tr-TR")
+: "—";
+
+function color(signal){
+const s = String(signal).toUpperCase();
+if(["AL","BUY"].includes(s)) return "green";
+if(["SAT","SELL"].includes(s)) return "red";
+return "yellow";
+}
+
+function parseSignals(text){
+const found = [];
+for(const line of String(text || "").split("\n")){
+try {
+const obj = JSON.parse(line.trim());
+if(obj.symbol && obj.signal) found.push(obj);
+} catch(e) {}
+}
+return found;
+}
+
+async function loadData(){
+message("Veriler güncelleniyor...");
+
+const [portfolio,runs,trades] = await Promise.all([
+db.from("bot_portfolio").select("*").eq("id",1).maybeSingle(),
+db.from("bot_runs").select("*").order("created_at",{ascending:false}).limit(20),
+db.from("bot_trades").select("*").order("executed_at",{ascending:false}).limit(20)
+]);
+
+const error = portfolio.error || runs.error || trades.error;
+if(error){
+message("Veri hatası: " + error.message);
+return;
+}
+
+const p = portfolio.data;
+if(p){
+const cash = Number(p.cash_balance || 0);
+el("balance").textContent = cash.toLocaleString("tr-TR",{
+minimumFractionDigits:2,
+maximumFractionDigits:2
+}) + " " + (p.currency || "TRY");
+
+el("botStatus").textContent = p.bot_enabled
+? "🟢 Bot etkin (veritabanı ayarı)"
+: "⏸️ Bot devre dışı";
+
+el("position").textContent = p.position_symbol
+? "Açık sanal pozisyon: " + p.position_symbol
+: "Açık sanal pozisyon bulunmuyor";
+} else {
+el("balance").textContent = "Kayıt yok";
+el("botStatus").textContent = "Portföy bulunamadı";
+}
+
+const scanList = runs.data || [];
+el("scanTime").textContent = scanList.length
+? "Son tarama: " + date(scanList[0].created_at)
+: "Henüz tarama yapılmadı";
+
+let signals = [];
+for(const run of scanList){
+signals = parseSignals(run.message);
+if(signals.length) break;
+}
+
+el("signals").innerHTML = signals.length
+? signals.map(s => `
+<div class="row">
+<span><strong>${escapeHtml(s.symbol)}</strong>
+<div class="small">${escapeHtml(s.price_usdt)} USDT</div></span>
+<span class="${color(s.signal)}">
+<strong>${escapeHtml(s.signal)}</strong></span>
+</div>`).join("")
+: "Henüz görüntülenebilir sinyal yok.";
+
+el("runs").innerHTML = scanList.length
+? scanList.slice(0,5).map(r => `
+<div class="row">
+<span>${escapeHtml(r.status || "Tarama")}</span>
+<span class="small">${escapeHtml(date(r.created_at))}</span>
+</div>`).join("")
+: "Tarama kaydı bulunmuyor.";
+
+const history = trades.data || [];
+el("trades").innerHTML = history.length
+? history.map(t => `
+<div class="row">
+<span><strong>${escapeHtml(t.symbol)}</strong>
+<div class="small">${escapeHtml(date(t.executed_at))}</div></span>
+<span class="${color(t.side)}">
+${escapeHtml(t.side)}<div class="small">${escapeHtml(t.quantity)} adet</div>
+</span>
+</div>`).join("")
+: "Henüz sanal işlem yapılmadı.";
+
+message("Son güncelleme: " + date(new Date()));
+}
+
+async function checkLogin(){
+const {data,error} = await db.auth.getUser();
+const loggedIn = !error && !!data.user;
+el("login").classList.toggle("hidden",loggedIn);
+el("panel").classList.toggle("hidden",!loggedIn);
+el("logout").classList.toggle("hidden",!loggedIn);
+if(loggedIn) await loadData();
+}
+
+el("loginForm").addEventListener("submit",async e=>{
+e.preventDefault();
+el("loginBtn").disabled = true;
+message("Giriş yapılıyor...");
+const {error} = await db.auth.signInWithPassword({
+email:el("email").value.trim(),
+password:el("password").value
+});
+el("loginBtn").disabled = false;
+if(error){
+message("Giriş hatası: " + error.message);
+return;
+}
+el("password").value = "";
+await checkLogin();
+});
+
+el("logout").onclick = async()=>{
+await db.auth.signOut();
+await checkLogin();
+message("Çıkış yapıldı.");
+};
+
+el("refresh").onclick = loadData;
+checkLogin().catch(e=>message("Bağlantı hatası: "+e.message));
+</script>
+</body>
+</html>
