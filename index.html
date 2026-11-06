@@ -86,12 +86,12 @@ button:disabled{opacity:.5}
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
-const URL = "https://ivmrpbdwsjtymzgghuwj.supabase.co";
+const SUPABASE_URL = "https://ivmrpbdwsjtymzgghuwj.supabase.co";
 const KEY = "sb_publishable_GjM8AWp8EY3lmmR-JncpLg_hB1HdsIV";
 
 const el = id => document.getElementById(id);
 const message = text => el("message").textContent = text;
-const db = window.supabase.createClient(URL, KEY);
+const db = window.supabase.createClient(SUPABASE_URL, KEY);
 
 const escapeHtml = value => String(value ?? "")
 .replace(/[&<>"']/g, c => ({
